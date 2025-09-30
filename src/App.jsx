@@ -1,5 +1,39 @@
 import { useState } from "react";
-import { Link } from "react-router-dom"; // 👈 NEW
+import { Link } from "react-router-dom";
+import { MapContainer, TileLayer, Marker, useMapEvents } from "react-leaflet";
+import "leaflet/dist/leaflet.css";
+import L from "leaflet";
+
+// Fix default marker icons for Leaflet
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl:
+    "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png",
+  iconUrl:
+    "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png",
+  shadowUrl:
+    "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png",
+});
+
+function LocationPicker({ formSample, setFormSample }) {
+  useMapEvents({
+    click(e) {
+      setFormSample({
+        ...formSample,
+        coordinates: {
+          x: e.latlng.lng.toFixed(6), // longitude
+          y: e.latlng.lat.toFixed(6), // latitude
+        },
+      });
+    },
+  });
+
+  return formSample.coordinates.x && formSample.coordinates.y ? (
+    <Marker
+      position={[formSample.coordinates.y, formSample.coordinates.x]}
+    ></Marker>
+  ) : null;
+}
 
 function Dashboard() {
   const [searchQuery, setSearchQuery] = useState("");
@@ -15,9 +49,10 @@ function Dashboard() {
       genus: "Acropora",
       species: "Acropora millepora",
       dateAcquired: "2025-08-31",
-      coordinates: { x: -8.672, y: 115.452 },
+      coordinates: { x: 115.452, y: -8.672 },
       registered: "2025-08-31 10:00:00",
       edited: "2025-09-05 14:30:00",
+      image: null,
     },
   ]);
 
@@ -35,23 +70,21 @@ function Dashboard() {
     species: "",
     dateAcquired: "",
     coordinates: { x: "", y: "" },
+    image: null,
   });
 
-  // Latest registered sample
   const latestRegistered = samples[samples.length - 1];
 
   const filtered = samples.filter((s) =>
     s.sampleName.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  // Generate ID
   const generateSampleId = (sample) => {
     const projectNum = String(sample.projectNumber).padStart(4, "0");
     const sampleNum = String(sample.sampleNumber).padStart(4, "0");
     return `${sample.projectSample}-${projectNum}-${sampleNum}`;
   };
 
-  // Open Add Form
   const openAddForm = () => {
     setEditIndex(null);
     setFormSample({
@@ -65,18 +98,17 @@ function Dashboard() {
       species: "",
       dateAcquired: "",
       coordinates: { x: "", y: "" },
+      image: null,
     });
     setShowForm(true);
   };
 
-  // Open Edit Form
   const openEditForm = (index) => {
     setEditIndex(index);
     setFormSample(samples[index]);
     setShowForm(true);
   };
 
-  // Save sample (add or edit)
   const handleSaveSample = (e) => {
     e.preventDefault();
     const id = generateSampleId(formSample);
@@ -107,6 +139,14 @@ function Dashboard() {
 
     setShowForm(false);
     setEditIndex(null);
+  };
+
+  const handleImageUpload = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const previewURL = URL.createObjectURL(file);
+      setFormSample({ ...formSample, image: previewURL });
+    }
   };
 
   return (
@@ -193,14 +233,23 @@ function Dashboard() {
             <h3>📌 Latest Registered Sample</h3>
             {latestRegistered && (
               <div>
-                {Object.entries(latestRegistered).map(([key, value]) => (
-                  <p key={key}>
-                    <b>{key}:</b>{" "}
-                    {typeof value === "object"
-                      ? `X: ${value.x}, Y: ${value.y}`
-                      : value}
-                  </p>
-                ))}
+                {latestRegistered.image && (
+                  <img
+                    src={latestRegistered.image}
+                    alt="sample"
+                    style={{ maxWidth: "100%", marginBottom: "10px" }}
+                  />
+                )}
+                {Object.entries(latestRegistered).map(([key, value]) =>
+                  key !== "image" ? (
+                    <p key={key}>
+                      <b>{key}:</b>{" "}
+                      {typeof value === "object"
+                        ? `X: ${value.x}, Y: ${value.y}`
+                        : value}
+                    </p>
+                  ) : null
+                )}
               </div>
             )}
           </div>
@@ -218,14 +267,23 @@ function Dashboard() {
             <h3>🛠️ Latest Edited Sample</h3>
             {latestEdited ? (
               <div>
-                {Object.entries(latestEdited).map(([key, value]) => (
-                  <p key={key}>
-                    <b>{key}:</b>{" "}
-                    {typeof value === "object"
-                      ? `X: ${value.x}, Y: ${value.y}`
-                      : value}
-                  </p>
-                ))}
+                {latestEdited.image && (
+                  <img
+                    src={latestEdited.image}
+                    alt="sample"
+                    style={{ maxWidth: "100%", marginBottom: "10px" }}
+                  />
+                )}
+                {Object.entries(latestEdited).map(([key, value]) =>
+                  key !== "image" ? (
+                    <p key={key}>
+                      <b>{key}:</b>{" "}
+                      {typeof value === "object"
+                        ? `X: ${value.x}, Y: ${value.y}`
+                        : value}
+                    </p>
+                  ) : null
+                )}
               </div>
             ) : (
               <p>No edits yet.</p>
@@ -240,6 +298,7 @@ function Dashboard() {
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr style={{ backgroundColor: "#f2f2f2" }}>
+              <th style={{ border: "1px solid #ccc", padding: "8px" }}>Image</th>
               <th style={{ border: "1px solid #ccc", padding: "8px" }}>ID</th>
               <th style={{ border: "1px solid #ccc", padding: "8px" }}>Name</th>
               <th style={{ border: "1px solid #ccc", padding: "8px" }}>
@@ -256,6 +315,21 @@ function Dashboard() {
           <tbody>
             {filtered.map((s, index) => (
               <tr key={s.sampleId}>
+                <td style={{ border: "1px solid #ccc", padding: "8px" }}>
+                  {s.image ? (
+                    <img
+                      src={s.image}
+                      alt="sample"
+                      style={{
+                        width: "60px",
+                        height: "60px",
+                        objectFit: "cover",
+                      }}
+                    />
+                  ) : (
+                    "No Image"
+                  )}
+                </td>
                 <td style={{ border: "1px solid #ccc", padding: "8px" }}>
                   {s.sampleId}
                 </td>
@@ -284,7 +358,7 @@ function Dashboard() {
                     Edit
                   </button>
                   <Link
-                    to={`/sample/${s.sampleId}`} // 👈 NEW: Detail page
+                    to={`/sample/${s.sampleId}`}
                     style={{
                       padding: "5px 10px",
                       backgroundColor: "#17a2b8",
@@ -302,7 +376,7 @@ function Dashboard() {
         </table>
       </div>
 
-      {/* Popup Form */}
+      {/* Popup Form with Scroll */}
       {showForm && (
         <div
           style={{
@@ -315,6 +389,8 @@ function Dashboard() {
             display: "flex",
             justifyContent: "center",
             alignItems: "center",
+            overflow: "auto",
+            padding: "20px",
           }}
         >
           <form
@@ -324,12 +400,30 @@ function Dashboard() {
               padding: "20px",
               borderRadius: "10px",
               width: "500px",
+              maxHeight: "90vh",
+              overflowY: "auto",
               boxShadow: "0 4px 10px rgba(0,0,0,0.3)",
               color: "black",
             }}
           >
             <h2>{editIndex !== null ? "Edit Sample" : "Add New Sample"}</h2>
 
+            {/* File upload */}
+            <input
+              type="file"
+              accept="image/*"
+              onChange={handleImageUpload}
+              style={{ width: "100%", marginBottom: "10px" }}
+            />
+            {formSample.image && (
+              <img
+                src={formSample.image}
+                alt="preview"
+                style={{ maxWidth: "100%", marginBottom: "10px" }}
+              />
+            )}
+
+            {/* Other inputs remain same */}
             <input
               type="text"
               placeholder="Sample Name"
@@ -424,33 +518,27 @@ function Dashboard() {
               style={{ width: "100%", marginBottom: "10px", padding: "8px" }}
             />
 
-            <input
-              type="number"
-              step="any"
-              placeholder="Coordinate X"
-              value={formSample.coordinates.x}
-              onChange={(e) =>
-                setFormSample({
-                  ...formSample,
-                  coordinates: { ...formSample.coordinates, x: e.target.value },
-                })
-              }
-              style={{ width: "100%", marginBottom: "10px", padding: "8px" }}
-            />
-
-            <input
-              type="number"
-              step="any"
-              placeholder="Coordinate Y"
-              value={formSample.coordinates.y}
-              onChange={(e) =>
-                setFormSample({
-                  ...formSample,
-                  coordinates: { ...formSample.coordinates, y: e.target.value },
-                })
-              }
-              style={{ width: "100%", marginBottom: "10px", padding: "8px" }}
-            />
+            {/* Map Picker */}
+            <div style={{ marginBottom: "10px" }}>
+              <label>
+                Coordinates (click on map): X={formSample.coordinates.x}, Y=
+                {formSample.coordinates.y}
+              </label>
+              <MapContainer
+                center={[-8.672, 115.452]}
+                zoom={5}
+                style={{ height: "300px", width: "100%", marginTop: "10px" }}
+              >
+                <TileLayer
+                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                  attribution="&copy; OpenStreetMap contributors"
+                />
+                <LocationPicker
+                  formSample={formSample}
+                  setFormSample={setFormSample}
+                />
+              </MapContainer>
+            </div>
 
             <div style={{ textAlign: "right" }}>
               <button

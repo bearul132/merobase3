@@ -40,3 +40,21 @@
 .read-the-docs {
   color: #888;
 }
+
+/* ✅ Leaflet map styles */
+.leaflet-container {
+  width: 100%;
+  height: 300px;
+  border-radius: 12px;
+  margin: 1rem 0;
+  z-index: 0;
+}
+
+.leaflet-control {
+  z-index: 1000; /* keeps zoom buttons visible */
+}
+
+.leaflet-marker-icon,
+.leaflet-marker-shadow {
+  z-index: 500;
+}
