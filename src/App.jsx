@@ -37,6 +37,7 @@ function LocationPicker({ formSample, setFormSample }) {
 
 function Dashboard() {
   const [searchQuery, setSearchQuery] = useState("");
+  const [filter, setFilter] = useState("all");
   const [samples, setSamples] = useState([
     {
       sampleId: "A-0012-0001",
@@ -53,6 +54,8 @@ function Dashboard() {
       registered: "2025-08-31 10:00:00",
       edited: "2025-09-05 14:30:00",
       image: null,
+      semPhoto: null,
+      isolatedPhoto: null,
     },
   ]);
 
@@ -71,13 +74,31 @@ function Dashboard() {
     dateAcquired: "",
     coordinates: { x: "", y: "" },
     image: null,
+    semPhoto: null,
+    isolatedPhoto: null,
   });
 
   const latestRegistered = samples[samples.length - 1];
 
-  const filtered = samples.filter((s) =>
-    s.sampleName.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  // 🔍 Search + Filter logic
+  const filtered = samples.filter((s) => {
+    const q = searchQuery.toLowerCase();
+    const matchesSearch =
+      s.sampleName.toLowerCase().includes(q) ||
+      s.species.toLowerCase().includes(q) ||
+      s.genus.toLowerCase().includes(q) ||
+      s.family.toLowerCase().includes(q) ||
+      s.sampleId.toLowerCase().includes(q);
+
+    const matchesFilter =
+      filter === "all" ||
+      (filter === "animalia" && s.kingdom.toLowerCase() === "animalia") ||
+      (filter === "plantae" && s.kingdom.toLowerCase() === "plantae") ||
+      (filter === "projectA" && s.projectSample === "A") ||
+      (filter === "projectB" && s.projectSample === "B");
+
+    return matchesSearch && matchesFilter;
+  });
 
   const generateSampleId = (sample) => {
     const projectNum = String(sample.projectNumber).padStart(4, "0");
@@ -99,6 +120,8 @@ function Dashboard() {
       dateAcquired: "",
       coordinates: { x: "", y: "" },
       image: null,
+      semPhoto: null,
+      isolatedPhoto: null,
     });
     setShowForm(true);
   };
@@ -141,11 +164,11 @@ function Dashboard() {
     setEditIndex(null);
   };
 
-  const handleImageUpload = (e) => {
+  const handleImageUpload = (e, type) => {
     const file = e.target.files[0];
     if (file) {
       const previewURL = URL.createObjectURL(file);
-      setFormSample({ ...formSample, image: previewURL });
+      setFormSample({ ...formSample, [type]: previewURL });
     }
   };
 
@@ -175,22 +198,44 @@ function Dashboard() {
           🌊 MEROBase Dashboard
         </h1>
 
-        {/* Search */}
-        <div style={{ marginBottom: "20px", textAlign: "center" }}>
+        {/* 🔍 Search + Filter UI */}
+        <div
+          style={{
+            marginBottom: "20px",
+            textAlign: "center",
+            display: "flex",
+            justifyContent: "center",
+            gap: "10px",
+          }}
+        >
           <input
             type="text"
-            placeholder="Search samples..."
+            placeholder="Search by name, ID, species, genus, family..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             style={{
               padding: "8px",
-              width: "60%",
-              maxWidth: "400px",
+              width: "300px",
               border: "1px solid #ccc",
               borderRadius: "5px",
               color: "black",
             }}
           />
+          <select
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            style={{
+              padding: "8px",
+              border: "1px solid #ccc",
+              borderRadius: "5px",
+            }}
+          >
+            <option value="all">All</option>
+            <option value="animalia">Kingdom: Animalia</option>
+            <option value="plantae">Kingdom: Plantae</option>
+            <option value="projectA">Project: A</option>
+            <option value="projectB">Project: B</option>
+          </select>
         </div>
 
         {/* Actions */}
@@ -240,15 +285,29 @@ function Dashboard() {
                     style={{ maxWidth: "100%", marginBottom: "10px" }}
                   />
                 )}
+                {latestRegistered.semPhoto && (
+                  <img
+                    src={latestRegistered.semPhoto}
+                    alt="sem"
+                    style={{ maxWidth: "100%", marginBottom: "10px" }}
+                  />
+                )}
+                {latestRegistered.isolatedPhoto && (
+                  <img
+                    src={latestRegistered.isolatedPhoto}
+                    alt="isolated"
+                    style={{ maxWidth: "100%", marginBottom: "10px" }}
+                  />
+                )}
                 {Object.entries(latestRegistered).map(([key, value]) =>
-                  key !== "image" ? (
+                  ["image", "semPhoto", "isolatedPhoto"].includes(key) ? null : (
                     <p key={key}>
                       <b>{key}:</b>{" "}
                       {typeof value === "object"
                         ? `X: ${value.x}, Y: ${value.y}`
                         : value}
                     </p>
-                  ) : null
+                  )
                 )}
               </div>
             )}
@@ -274,15 +333,29 @@ function Dashboard() {
                     style={{ maxWidth: "100%", marginBottom: "10px" }}
                   />
                 )}
+                {latestEdited.semPhoto && (
+                  <img
+                    src={latestEdited.semPhoto}
+                    alt="sem"
+                    style={{ maxWidth: "100%", marginBottom: "10px" }}
+                  />
+                )}
+                {latestEdited.isolatedPhoto && (
+                  <img
+                    src={latestEdited.isolatedPhoto}
+                    alt="isolated"
+                    style={{ maxWidth: "100%", marginBottom: "10px" }}
+                  />
+                )}
                 {Object.entries(latestEdited).map(([key, value]) =>
-                  key !== "image" ? (
+                  ["image", "semPhoto", "isolatedPhoto"].includes(key) ? null : (
                     <p key={key}>
                       <b>{key}:</b>{" "}
                       {typeof value === "object"
                         ? `X: ${value.x}, Y: ${value.y}`
                         : value}
                     </p>
-                  ) : null
+                  )
                 )}
               </div>
             ) : (
@@ -408,11 +481,12 @@ function Dashboard() {
           >
             <h2>{editIndex !== null ? "Edit Sample" : "Add New Sample"}</h2>
 
-            {/* File upload */}
+            {/* General Image */}
+            <label>General Image:</label>
             <input
               type="file"
               accept="image/*"
-              onChange={handleImageUpload}
+              onChange={(e) => handleImageUpload(e, "image")}
               style={{ width: "100%", marginBottom: "10px" }}
             />
             {formSample.image && (
@@ -423,7 +497,39 @@ function Dashboard() {
               />
             )}
 
-            {/* Other inputs remain same */}
+            {/* SEM Photo */}
+            <label>SEM Photo:</label>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={(e) => handleImageUpload(e, "semPhoto")}
+              style={{ width: "100%", marginBottom: "10px" }}
+            />
+            {formSample.semPhoto && (
+              <img
+                src={formSample.semPhoto}
+                alt="sem"
+                style={{ maxWidth: "100%", marginBottom: "10px" }}
+              />
+            )}
+
+            {/* Isolated Photo */}
+            <label>Isolated Photo:</label>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={(e) => handleImageUpload(e, "isolatedPhoto")}
+              style={{ width: "100%", marginBottom: "10px" }}
+            />
+            {formSample.isolatedPhoto && (
+              <img
+                src={formSample.isolatedPhoto}
+                alt="isolated"
+                style={{ maxWidth: "100%", marginBottom: "10px" }}
+              />
+            )}
+
+            {/* Other inputs */}
             <input
               type="text"
               placeholder="Sample Name"
