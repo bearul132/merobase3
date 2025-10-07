@@ -1,10 +1,10 @@
-import { useState } from "react";
-import { Link } from "react-router-dom";
-import { MapContainer, TileLayer, Marker, useMapEvents } from "react-leaflet";
+import { useState, useRef, useEffect } from "react";
+import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
+import "leaflet-geosearch/dist/geosearch.css";
+import { OpenStreetMapProvider } from "leaflet-geosearch";
 import L from "leaflet";
 
-// Fix default marker icons for Leaflet
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl:
@@ -15,29 +15,133 @@ L.Icon.Default.mergeOptions({
     "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png",
 });
 
-function LocationPicker({ formSample, setFormSample }) {
+/* --- Small helper components for the searchable map inside the form --- */
+
+// A component inside MapContainer that centers/flys the map when `center` prop changes.
+function MapController({ center }) {
+  const map = useMap();
+  useEffect(() => {
+    if (center && center.lat && center.lng) {
+      map.setView([center.lat, center.lng], Math.max(map.getZoom(), 10));
+    }
+  }, [center, map]);
+  return null;
+}
+
+// Handles clicks on map to update coordinates in the parent formSample.
+function ClickSetter({ formSample, setFormSample }) {
   useMapEvents({
     click(e) {
+      const lat = Number(e.latlng.lat.toFixed(6));
+      const lng = Number(e.latlng.lng.toFixed(6));
       setFormSample({
         ...formSample,
-        coordinates: {
-          x: e.latlng.lng.toFixed(6), // longitude
-          y: e.latlng.lat.toFixed(6), // latitude
-        },
+        coordinates: { x: lng, y: lat },
       });
     },
   });
-
-  return formSample.coordinates.x && formSample.coordinates.y ? (
-    <Marker
-      position={[formSample.coordinates.y, formSample.coordinates.x]}
-    ></Marker>
-  ) : null;
+  return null;
 }
+
+function SearchableMap({ formSample, setFormSample }) {
+  const providerRef = useRef(new OpenStreetMapProvider());
+  const [query, setQuery] = useState("");
+  const [center, setCenter] = useState(
+    formSample.coordinates.x && formSample.coordinates.y
+      ? { lat: Number(formSample.coordinates.y), lng: Number(formSample.coordinates.x) }
+      : { lat: -8.672, lng: 115.452 }
+  );
+
+  // keep center in sync if coordinates changed externally
+  useEffect(() => {
+    if (formSample.coordinates.x && formSample.coordinates.y) {
+      setCenter({
+        lat: Number(formSample.coordinates.y),
+        lng: Number(formSample.coordinates.x),
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formSample.coordinates.x, formSample.coordinates.y]);
+
+  const handleSearch = async () => {
+    if (!query) return;
+    try {
+      const results = await providerRef.current.search({ query });
+      if (results && results.length > 0) {
+        const r = results[0];
+        // provider returns x = lon, y = lat
+        const lat = Number(r.y);
+        const lng = Number(r.x);
+        // update both the form values and local center for map
+        setFormSample({
+          ...formSample,
+          coordinates: { x: Number(lng.toFixed(6)), y: Number(lat.toFixed(6)) },
+        });
+        setCenter({ lat, lng });
+      } else {
+        // no results — you might want to show an alert in future
+      }
+    } catch (err) {
+      console.error("Geosearch error", err);
+    }
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+        <input
+          type="text"
+          placeholder="Search location (e.g. Bali)"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          style={{
+            flex: 1,
+            padding: 8,
+            borderRadius: 6,
+            border: "1px solid #ccc",
+          }}
+        />
+        <button
+          type="button"
+          onClick={handleSearch}
+          style={{
+            padding: "8px 12px",
+            background: "#007bff",
+            color: "white",
+            border: "none",
+            borderRadius: 6,
+            cursor: "pointer",
+          }}
+        >
+          Search
+        </button>
+      </div>
+
+      <MapContainer
+        center={[center.lat, center.lng]}
+        zoom={10}
+        style={{ height: "250px", width: "100%", borderRadius: 8 }}
+      >
+        <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+        <MapController center={center} />
+        <ClickSetter formSample={formSample} setFormSample={setFormSample} />
+        {formSample.coordinates.x && formSample.coordinates.y && (
+          <Marker position={[Number(formSample.coordinates.y), Number(formSample.coordinates.x)]} />
+        )}
+      </MapContainer>
+    </div>
+  );
+}
+
+/* -------------------- Dashboard (merged) -------------------- */
 
 function Dashboard() {
   const [searchQuery, setSearchQuery] = useState("");
   const [filter, setFilter] = useState("all");
+  const [sortBy, setSortBy] = useState("latest");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+
   const [samples, setSamples] = useState([
     {
       sampleId: "A-0012-0001",
@@ -61,7 +165,10 @@ function Dashboard() {
 
   const [latestEdited, setLatestEdited] = useState(null);
   const [showForm, setShowForm] = useState(false);
+  const [showView, setShowView] = useState(false);
+  const [viewSample, setViewSample] = useState(null);
   const [editIndex, setEditIndex] = useState(null);
+
   const [formSample, setFormSample] = useState({
     sampleName: "",
     projectSample: "A",
@@ -80,31 +187,50 @@ function Dashboard() {
 
   const latestRegistered = samples[samples.length - 1];
 
-  // 🔍 Search + Filter logic
-  const filtered = samples.filter((s) => {
-    const q = searchQuery.toLowerCase();
-    const matchesSearch =
-      s.sampleName.toLowerCase().includes(q) ||
-      s.species.toLowerCase().includes(q) ||
-      s.genus.toLowerCase().includes(q) ||
-      s.family.toLowerCase().includes(q) ||
-      s.sampleId.toLowerCase().includes(q);
+  // Filter + search + date + sort logic
+  const filtered = samples
+    .filter((s) => {
+      const q = searchQuery.toLowerCase();
+      const matchesSearch =
+        s.sampleName.toLowerCase().includes(q) ||
+        (s.species || "").toLowerCase().includes(q) ||
+        (s.genus || "").toLowerCase().includes(q) ||
+        (s.family || "").toLowerCase().includes(q) ||
+        (s.sampleId || "").toLowerCase().includes(q);
 
-    const matchesFilter =
-      filter === "all" ||
-      (filter === "animalia" && s.kingdom.toLowerCase() === "animalia") ||
-      (filter === "plantae" && s.kingdom.toLowerCase() === "plantae") ||
-      (filter === "projectA" && s.projectSample === "A") ||
-      (filter === "projectB" && s.projectSample === "B");
+      const matchesFilter =
+        filter === "all" ||
+        (filter === "animalia" && (s.kingdom || "").toLowerCase() === "animalia") ||
+        (filter === "plantae" && (s.kingdom || "").toLowerCase() === "plantae") ||
+        (filter === "projectA" && s.projectSample === "A") ||
+        (filter === "projectB" && s.projectSample === "B");
 
-    return matchesSearch && matchesFilter;
-  });
+      const matchesDate =
+        (!dateFrom || new Date(s.dateAcquired) >= new Date(dateFrom)) &&
+        (!dateTo || new Date(s.dateAcquired) <= new Date(dateTo));
 
-  const generateSampleId = (sample) => {
-    const projectNum = String(sample.projectNumber).padStart(4, "0");
-    const sampleNum = String(sample.sampleNumber).padStart(4, "0");
-    return `${sample.projectSample}-${projectNum}-${sampleNum}`;
-  };
+      return matchesSearch && matchesFilter && matchesDate;
+    })
+    .sort((a, b) =>
+      sortBy === "latest"
+        ? new Date(b.edited) - new Date(a.edited)
+        : new Date(a.edited) - new Date(b.edited)
+    );
+
+const generateSampleId = (sample) => {
+  const projectNum = String(sample.projectNumber).padStart(4, "0");
+  const sampleNum = String(sample.sampleNumber).padStart(4, "0");
+  let baseId = `${sample.projectSample}-${projectNum}-${sampleNum}`;
+
+  const hasSEM = !!sample.semPhoto;
+  const hasISO = !!sample.isolatedPhoto;
+
+  if (hasSEM && hasISO) baseId += "-SEM-ISO";
+  else if (hasSEM) baseId += "-SEM";
+  else if (hasISO) baseId += "-ISO";
+
+  return baseId;
+};
 
   const openAddForm = () => {
     setEditIndex(null);
@@ -128,8 +254,22 @@ function Dashboard() {
 
   const openEditForm = (index) => {
     setEditIndex(index);
-    setFormSample(samples[index]);
+    // ensure we copy to avoid mutating source object directly
+    const src = samples[index];
+    setFormSample({
+      ...src,
+      // coordinates ensure number formatting
+      coordinates: {
+        x: src.coordinates?.x ?? "",
+        y: src.coordinates?.y ?? "",
+      },
+    });
     setShowForm(true);
+  };
+
+  const openViewModal = (sample) => {
+    setViewSample(sample);
+    setShowView(true);
   };
 
   const handleSaveSample = (e) => {
@@ -139,8 +279,18 @@ function Dashboard() {
     const formattedDate = now.toISOString().split("T")[0];
     const formattedTime = now.toLocaleTimeString();
 
+    // Ensure coordinates are numbers (decimal degrees)
+    const coords =
+      formSample.coordinates && formSample.coordinates.x !== ""
+        ? {
+            x: Number(formSample.coordinates.x),
+            y: Number(formSample.coordinates.y),
+          }
+        : { x: "", y: "" };
+
     const sampleToSave = {
       ...formSample,
+      coordinates: coords,
       sampleId: id,
       registered:
         editIndex === null
@@ -166,10 +316,9 @@ function Dashboard() {
 
   const handleImageUpload = (e, type) => {
     const file = e.target.files[0];
-    if (file) {
-      const previewURL = URL.createObjectURL(file);
-      setFormSample({ ...formSample, [type]: previewURL });
-    }
+    if (!file) return;
+    const previewURL = URL.createObjectURL(file);
+    setFormSample((prev) => ({ ...prev, [type]: previewURL }));
   };
 
   return (
@@ -198,12 +347,13 @@ function Dashboard() {
           🌊 MEROBase Dashboard
         </h1>
 
-        {/* 🔍 Search + Filter UI */}
+        {/* Search + Filter + Sort + Date */}
         <div
           style={{
             marginBottom: "20px",
             textAlign: "center",
             display: "flex",
+            flexWrap: "wrap",
             justifyContent: "center",
             gap: "10px",
           }}
@@ -215,7 +365,7 @@ function Dashboard() {
             onChange={(e) => setSearchQuery(e.target.value)}
             style={{
               padding: "8px",
-              width: "300px",
+              width: "250px",
               border: "1px solid #ccc",
               borderRadius: "5px",
               color: "black",
@@ -224,11 +374,7 @@ function Dashboard() {
           <select
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            style={{
-              padding: "8px",
-              border: "1px solid #ccc",
-              borderRadius: "5px",
-            }}
+            style={{ padding: "8px", borderRadius: "5px" }}
           >
             <option value="all">All</option>
             <option value="animalia">Kingdom: Animalia</option>
@@ -236,14 +382,33 @@ function Dashboard() {
             <option value="projectA">Project: A</option>
             <option value="projectB">Project: B</option>
           </select>
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value)}
+            style={{ padding: "8px", borderRadius: "5px" }}
+          >
+            <option value="latest">Sort: Latest Edited</option>
+            <option value="oldest">Sort: Oldest Edited</option>
+          </select>
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => setDateFrom(e.target.value)}
+            style={{ padding: "8px", borderRadius: "5px" }}
+          />
+          <input
+            type="date"
+            value={dateTo}
+            onChange={(e) => setDateTo(e.target.value)}
+            style={{ padding: "8px", borderRadius: "5px" }}
+          />
         </div>
 
-        {/* Actions */}
+        {/* Add Button */}
         <div style={{ textAlign: "center", marginBottom: "30px" }}>
           <button
             onClick={openAddForm}
             style={{
-              marginRight: "10px",
               padding: "10px 15px",
               border: "none",
               backgroundColor: "#28a745",
@@ -256,171 +421,46 @@ function Dashboard() {
           </button>
         </div>
 
-        {/* Info Section */}
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            gap: "20px",
-            marginBottom: "30px",
-          }}
-        >
-          {/* Latest Registered */}
-          <div
-            style={{
-              flex: 1,
-              border: "1px solid #ccc",
-              padding: "15px",
-              borderRadius: "8px",
-              backgroundColor: "#fdfdfd",
-            }}
-          >
-            <h3>📌 Latest Registered Sample</h3>
-            {latestRegistered && (
-              <div>
-                {latestRegistered.image && (
-                  <img
-                    src={latestRegistered.image}
-                    alt="sample"
-                    style={{ maxWidth: "100%", marginBottom: "10px" }}
-                  />
-                )}
-                {latestRegistered.semPhoto && (
-                  <img
-                    src={latestRegistered.semPhoto}
-                    alt="sem"
-                    style={{ maxWidth: "100%", marginBottom: "10px" }}
-                  />
-                )}
-                {latestRegistered.isolatedPhoto && (
-                  <img
-                    src={latestRegistered.isolatedPhoto}
-                    alt="isolated"
-                    style={{ maxWidth: "100%", marginBottom: "10px" }}
-                  />
-                )}
-                {Object.entries(latestRegistered).map(([key, value]) =>
-                  ["image", "semPhoto", "isolatedPhoto"].includes(key) ? null : (
-                    <p key={key}>
-                      <b>{key}:</b>{" "}
-                      {typeof value === "object"
-                        ? `X: ${value.x}, Y: ${value.y}`
-                        : value}
-                    </p>
-                  )
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Latest Edited */}
-          <div
-            style={{
-              flex: 1,
-              border: "1px solid #ccc",
-              padding: "15px",
-              borderRadius: "8px",
-              backgroundColor: "#fdfdfd",
-            }}
-          >
-            <h3>🛠️ Latest Edited Sample</h3>
-            {latestEdited ? (
-              <div>
-                {latestEdited.image && (
-                  <img
-                    src={latestEdited.image}
-                    alt="sample"
-                    style={{ maxWidth: "100%", marginBottom: "10px" }}
-                  />
-                )}
-                {latestEdited.semPhoto && (
-                  <img
-                    src={latestEdited.semPhoto}
-                    alt="sem"
-                    style={{ maxWidth: "100%", marginBottom: "10px" }}
-                  />
-                )}
-                {latestEdited.isolatedPhoto && (
-                  <img
-                    src={latestEdited.isolatedPhoto}
-                    alt="isolated"
-                    style={{ maxWidth: "100%", marginBottom: "10px" }}
-                  />
-                )}
-                {Object.entries(latestEdited).map(([key, value]) =>
-                  ["image", "semPhoto", "isolatedPhoto"].includes(key) ? null : (
-                    <p key={key}>
-                      <b>{key}:</b>{" "}
-                      {typeof value === "object"
-                        ? `X: ${value.x}, Y: ${value.y}`
-                        : value}
-                    </p>
-                  )
-                )}
-              </div>
-            ) : (
-              <p>No edits yet.</p>
-            )}
-          </div>
-        </div>
-
-        {/* Sample List */}
-        <h2 style={{ marginBottom: "15px", textAlign: "center" }}>
-          📂 All Samples
-        </h2>
+        {/* Table */}
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr style={{ backgroundColor: "#f2f2f2" }}>
-              <th style={{ border: "1px solid #ccc", padding: "8px" }}>Image</th>
-              <th style={{ border: "1px solid #ccc", padding: "8px" }}>ID</th>
-              <th style={{ border: "1px solid #ccc", padding: "8px" }}>Name</th>
-              <th style={{ border: "1px solid #ccc", padding: "8px" }}>
-                Species
-              </th>
-              <th style={{ border: "1px solid #ccc", padding: "8px" }}>
-                Last Edited
-              </th>
-              <th style={{ border: "1px solid #ccc", padding: "8px" }}>
-                Actions
-              </th>
+              <th>Image</th>
+              <th>ID</th>
+              <th>Name</th>
+              <th>Species</th>
+              <th>Last Edited</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
             {filtered.map((s, index) => (
               <tr key={s.sampleId}>
-                <td style={{ border: "1px solid #ccc", padding: "8px" }}>
+                <td style={{ textAlign: "center" }}>
                   {s.image ? (
                     <img
                       src={s.image}
-                      alt="sample"
+                      alt="thumb"
                       style={{
-                        width: "60px",
-                        height: "60px",
+                        width: "50px",
+                        height: "50px",
                         objectFit: "cover",
+                        borderRadius: "6px",
                       }}
                     />
                   ) : (
                     "No Image"
                   )}
                 </td>
-                <td style={{ border: "1px solid #ccc", padding: "8px" }}>
-                  {s.sampleId}
-                </td>
-                <td style={{ border: "1px solid #ccc", padding: "8px" }}>
-                  {s.sampleName}
-                </td>
-                <td style={{ border: "1px solid #ccc", padding: "8px" }}>
-                  {s.species}
-                </td>
-                <td style={{ border: "1px solid #ccc", padding: "8px" }}>
-                  {s.edited}
-                </td>
-                <td style={{ border: "1px solid #ccc", padding: "8px" }}>
+                <td>{s.sampleId}</td>
+                <td>{s.sampleName}</td>
+                <td>{s.species}</td>
+                <td>{s.edited}</td>
+                <td>
                   <button
                     onClick={() => openEditForm(index)}
                     style={{
                       padding: "5px 10px",
-                      border: "none",
                       backgroundColor: "#007bff",
                       color: "white",
                       borderRadius: "5px",
@@ -430,18 +470,18 @@ function Dashboard() {
                   >
                     Edit
                   </button>
-                  <Link
-                    to={`/sample/${s.sampleId}`}
+                  <button
+                    onClick={() => openViewModal(s)}
                     style={{
                       padding: "5px 10px",
                       backgroundColor: "#17a2b8",
                       color: "white",
                       borderRadius: "5px",
-                      textDecoration: "none",
+                      cursor: "pointer",
                     }}
                   >
                     View
-                  </Link>
+                  </button>
                 </td>
               </tr>
             ))}
@@ -449,7 +489,80 @@ function Dashboard() {
         </table>
       </div>
 
-      {/* Popup Form with Scroll */}
+      {/* View Modal */}
+      {showView && viewSample && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            background: "rgba(255,255,255,0.95)",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            overflow: "auto",
+            padding: "30px",
+            zIndex: 999,
+          }}
+          onClick={() => setShowView(false)}
+        >
+          <div
+            style={{
+              background: "#fff",
+              padding: "20px",
+              borderRadius: "10px",
+              maxWidth: "600px",
+              width: "100%",
+              overflowY: "auto",
+              color: "black",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 style={{ textAlign: "center" }}>Sample Details</h2>
+
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "center",
+                gap: "10px",
+                marginBottom: "15px",
+              }}
+            >
+              {["image", "semPhoto", "isolatedPhoto"].map((t) =>
+                viewSample[t] ? (
+                  <a key={t} href={viewSample[t]} target="_blank" rel="noreferrer">
+                    <img
+                      src={viewSample[t]}
+                      alt={t}
+                      style={{
+                        width: "80px",
+                        height: "80px",
+                        objectFit: "cover",
+                        borderRadius: "8px",
+                      }}
+                    />
+                  </a>
+                ) : null
+              )}
+            </div>
+
+            {Object.entries(viewSample).map(([key, value]) =>
+              ["image", "semPhoto", "isolatedPhoto"].includes(key) ? null : (
+                <p key={key}>
+                  <b>{key}:</b>{" "}
+                  {typeof value === "object"
+                    ? `X: ${value.x}, Y: ${value.y}`
+                    : String(value)}
+                </p>
+              )
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Form Modal */}
       {showForm && (
         <div
           style={{
@@ -458,223 +571,162 @@ function Dashboard() {
             left: 0,
             width: "100%",
             height: "100%",
-            background: "rgba(0,0,0,0.5)",
+            background: "rgba(255,255,255,0.97)",
             display: "flex",
             justifyContent: "center",
             alignItems: "center",
             overflow: "auto",
             padding: "20px",
+            zIndex: 1000,
           }}
+          onClick={() => setShowForm(false)}
         >
           <form
+            onClick={(e) => e.stopPropagation()}
             onSubmit={handleSaveSample}
             style={{
               background: "#fff",
               padding: "20px",
               borderRadius: "10px",
-              width: "500px",
+              width: "100%",
+              maxWidth: "800px",
               maxHeight: "90vh",
               overflowY: "auto",
-              boxShadow: "0 4px 10px rgba(0,0,0,0.3)",
-              color: "black",
+              boxShadow: "0 4px 10px rgba(0,0,0,0.2)",
             }}
           >
-            <h2>{editIndex !== null ? "Edit Sample" : "Add New Sample"}</h2>
+            <h2 style={{ textAlign: "center" }}>
+              {editIndex !== null ? "Edit Sample" : "Add New Sample"}
+            </h2>
 
-            {/* General Image */}
-            <label>General Image:</label>
-            <input
-              type="file"
-              accept="image/*"
-              onChange={(e) => handleImageUpload(e, "image")}
-              style={{ width: "100%", marginBottom: "10px" }}
-            />
-            {formSample.image && (
-              <img
-                src={formSample.image}
-                alt="preview"
-                style={{ maxWidth: "100%", marginBottom: "10px" }}
-              />
-            )}
-
-            {/* SEM Photo */}
-            <label>SEM Photo:</label>
-            <input
-              type="file"
-              accept="image/*"
-              onChange={(e) => handleImageUpload(e, "semPhoto")}
-              style={{ width: "100%", marginBottom: "10px" }}
-            />
-            {formSample.semPhoto && (
-              <img
-                src={formSample.semPhoto}
-                alt="sem"
-                style={{ maxWidth: "100%", marginBottom: "10px" }}
-              />
-            )}
-
-            {/* Isolated Photo */}
-            <label>Isolated Photo:</label>
-            <input
-              type="file"
-              accept="image/*"
-              onChange={(e) => handleImageUpload(e, "isolatedPhoto")}
-              style={{ width: "100%", marginBottom: "10px" }}
-            />
-            {formSample.isolatedPhoto && (
-              <img
-                src={formSample.isolatedPhoto}
-                alt="isolated"
-                style={{ maxWidth: "100%", marginBottom: "10px" }}
-              />
-            )}
-
-            {/* Other inputs */}
-            <input
-              type="text"
-              placeholder="Sample Name"
-              value={formSample.sampleName}
-              onChange={(e) =>
-                setFormSample({ ...formSample, sampleName: e.target.value })
-              }
-              required
-              style={{ width: "100%", marginBottom: "10px", padding: "8px" }}
-            />
-
-            <select
-              value={formSample.projectSample}
-              onChange={(e) =>
-                setFormSample({ ...formSample, projectSample: e.target.value })
-              }
-              style={{ width: "100%", marginBottom: "10px", padding: "8px" }}
-            >
-              <option value="A">Project A</option>
-              <option value="B">Project B</option>
-            </select>
-
-            <input
-              type="number"
-              placeholder="Project Number"
-              value={formSample.projectNumber}
-              onChange={(e) =>
-                setFormSample({ ...formSample, projectNumber: e.target.value })
-              }
-              required
-              style={{ width: "100%", marginBottom: "10px", padding: "8px" }}
-            />
-
-            <input
-              type="number"
-              placeholder="Sample Number"
-              value={formSample.sampleNumber}
-              onChange={(e) =>
-                setFormSample({ ...formSample, sampleNumber: e.target.value })
-              }
-              required
-              style={{ width: "100%", marginBottom: "10px", padding: "8px" }}
-            />
-
-            <input
-              type="text"
-              placeholder="Kingdom"
-              value={formSample.kingdom}
-              onChange={(e) =>
-                setFormSample({ ...formSample, kingdom: e.target.value })
-              }
-              style={{ width: "100%", marginBottom: "10px", padding: "8px" }}
-            />
-
-            <input
-              type="text"
-              placeholder="Family"
-              value={formSample.family}
-              onChange={(e) =>
-                setFormSample({ ...formSample, family: e.target.value })
-              }
-              style={{ width: "100%", marginBottom: "10px", padding: "8px" }}
-            />
-
-            <input
-              type="text"
-              placeholder="Genus"
-              value={formSample.genus}
-              onChange={(e) =>
-                setFormSample({ ...formSample, genus: e.target.value })
-              }
-              style={{ width: "100%", marginBottom: "10px", padding: "8px" }}
-            />
-
-            <input
-              type="text"
-              placeholder="Species"
-              value={formSample.species}
-              onChange={(e) =>
-                setFormSample({ ...formSample, species: e.target.value })
-              }
-              style={{ width: "100%", marginBottom: "10px", padding: "8px" }}
-            />
-
-            <input
-              type="date"
-              placeholder="Date Acquired"
-              value={formSample.dateAcquired}
-              onChange={(e) =>
-                setFormSample({ ...formSample, dateAcquired: e.target.value })
-              }
-              style={{ width: "100%", marginBottom: "10px", padding: "8px" }}
-            />
-
-            {/* Map Picker */}
-            <div style={{ marginBottom: "10px" }}>
-              <label>
-                Coordinates (click on map): X={formSample.coordinates.x}, Y=
-                {formSample.coordinates.y}
-              </label>
-              <MapContainer
-                center={[-8.672, 115.452]}
-                zoom={5}
-                style={{ height: "300px", width: "100%", marginTop: "10px" }}
-              >
-                <TileLayer
-                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                  attribution="&copy; OpenStreetMap contributors"
+            <div style={{ display: "grid", gap: 10 }}>
+              {/* >>> MOVED: Sample Photo on top under header */}
+              <div style={{ marginBottom: 6 }}>
+                <label style={{ fontWeight: 600 }}>Sample Photo:</label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => handleImageUpload(e, "image")}
+                  style={{ display: "block", marginTop: 6 }}
                 />
-                <LocationPicker
-                  formSample={formSample}
-                  setFormSample={setFormSample}
-                />
-              </MapContainer>
-            </div>
+                {formSample.image && (
+                  <img
+                    src={formSample.image}
+                    alt={"Sample Photo"}
+                    style={{
+                      width: "120px",
+                      height: "120px",
+                      objectFit: "cover",
+                      borderRadius: "8px",
+                      marginTop: 8,
+                    }}
+                  />
+                )}
+              </div>
 
-            <div style={{ textAlign: "right" }}>
-              <button
-                type="button"
-                onClick={() => setShowForm(false)}
-                style={{
-                  marginRight: "10px",
-                  padding: "8px 12px",
-                  border: "none",
-                  backgroundColor: "#dc3545",
-                  color: "white",
-                  borderRadius: "5px",
-                  cursor: "pointer",
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                style={{
-                  padding: "8px 12px",
-                  border: "none",
-                  backgroundColor: "#28a745",
-                  color: "white",
-                  borderRadius: "5px",
-                  cursor: "pointer",
-                }}
-              >
-                Save
-              </button>
+              {/* main fields */}
+              {[
+                { name: "sampleName", label: "Sample Name", type: "text" },
+                { name: "projectSample", label: "Project Sample (A/B)", type: "text" },
+                { name: "projectNumber", label: "Project Number", type: "number" },
+                { name: "sampleNumber", label: "Sample Number", type: "number" },
+                { name: "kingdom", label: "Kingdom", type: "text" },
+                { name: "family", label: "Family", type: "text" },
+                { name: "genus", label: "Genus", type: "text" },
+                { name: "species", label: "Species", type: "text" },
+                { name: "dateAcquired", label: "Date Acquired", type: "date" },
+              ].map((field) => (
+                <div key={field.name} style={{ marginBottom: 6 }}>
+                  <label style={{ fontWeight: 600 }}>{field.label}:</label>
+                  <input
+                    type={field.type}
+                    value={formSample[field.name] ?? ""}
+                    onChange={(e) =>
+                      setFormSample({ ...formSample, [field.name]: e.target.value })
+                    }
+                    required={field.name === "sampleName" || field.name === "projectNumber" || field.name === "sampleNumber"}
+                    style={{
+                      width: "100%",
+                      padding: "8px",
+                      border: "1px solid #ccc",
+                      borderRadius: "5px",
+                      marginTop: 4,
+                    }}
+                  />
+                </div>
+              ))}
+
+              {/* SEM & Isolated uploads remain at the bottom */}
+              {[
+                { type: "semPhoto", label: "SEM Photo" },
+                { type: "isolatedPhoto", label: "Isolated Photo" },
+              ].map(({ type, label }) => (
+                <div key={type} style={{ marginBottom: 6 }}>
+                  <label style={{ fontWeight: 600 }}>{label}:</label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => handleImageUpload(e, type)}
+                    style={{ display: "block", marginTop: 6 }}
+                  />
+                  {formSample[type] && (
+                    <img
+                      src={formSample[type]}
+                      alt={label}
+                      style={{
+                        width: "80px",
+                        height: "80px",
+                        objectFit: "cover",
+                        borderRadius: "5px",
+                        marginTop: 6,
+                      }}
+                    />
+                  )}
+                </div>
+              ))}
+
+              {/* Map with search */}
+              <div style={{ marginTop: 8 }}>
+                <b>Pick Location</b>
+                <SearchableMap formSample={formSample} setFormSample={setFormSample} />
+                <div style={{ marginTop: 6 }}>
+                  Coordinates (decimal degrees):{" "}
+                  <span style={{ fontWeight: 700 }}>
+                    X: {formSample.coordinates.x ?? ""}, Y: {formSample.coordinates.y ?? ""}
+                  </span>
+                </div>
+              </div>
+
+              <div style={{ textAlign: "center", marginTop: 12 }}>
+                <button
+                  type="submit"
+                  style={{
+                    padding: "10px 20px",
+                    backgroundColor: "#28a745",
+                    color: "white",
+                    borderRadius: "6px",
+                    cursor: "pointer",
+                    border: "none",
+                  }}
+                >
+                  Save Sample
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowForm(false)}
+                  style={{
+                    padding: "10px 14px",
+                    marginLeft: 8,
+                    backgroundColor: "#dc3545",
+                    color: "white",
+                    borderRadius: "6px",
+                    cursor: "pointer",
+                    border: "none",
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
             </div>
           </form>
         </div>
