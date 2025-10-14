@@ -4,6 +4,11 @@ import "leaflet/dist/leaflet.css";
 import "leaflet-geosearch/dist/geosearch.css";
 import { OpenStreetMapProvider } from "leaflet-geosearch";
 import L from "leaflet";
+import logo from "./assets/mero.jpg";
+import ReactDatePicker from "react-datepicker";
+import "react-datepicker/dist/react-datepicker.css";
+
+
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -139,8 +144,9 @@ function Dashboard() {
   const [searchQuery, setSearchQuery] = useState("");
   const [filter, setFilter] = useState("all");
   const [sortBy, setSortBy] = useState("latest");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  const [dateRange, setDateRange] = useState([null, null]);
+  const [startDate, endDate] = dateRange;
+
 
   const [samples, setSamples] = useState([
     {
@@ -200,14 +206,24 @@ function Dashboard() {
 
       const matchesFilter =
         filter === "all" ||
+        (filter === "acropora" && (s.genus || "").toLowerCase() === "acropora") ||
+        (filter === "pocilopora" && (s.genus || "").toLowerCase() === "pocilopora") ||
+        (filter === "chromodoris" && (s.genus || "").toLowerCase() === "chromodoris") ||
+        (filter === "hypselodoris" && (s.genus || "").toLowerCase() === "hypselodoris") ||
+        (filter === "glossodoris" && (s.genus || "").toLowerCase() === "glossodoris") ||
         (filter === "animalia" && (s.kingdom || "").toLowerCase() === "animalia") ||
         (filter === "plantae" && (s.kingdom || "").toLowerCase() === "plantae") ||
+        (filter === "fungi" && (s.kingdom || "").toLowerCase() === "fungi") ||
+        (filter === "bacteria" && (s.kingdom || "").toLowerCase() === "bacteria") ||
+        (filter === "archaebacteria" && (s.kingdom || "").toLowerCase() === "archaebacteria") ||
+        (filter === "eubacteria" && (s.kingdom || "").toLowerCase() === "eubacteria") ||
         (filter === "projectA" && s.projectSample === "A") ||
         (filter === "projectB" && s.projectSample === "B");
 
       const matchesDate =
-        (!dateFrom || new Date(s.dateAcquired) >= new Date(dateFrom)) &&
-        (!dateTo || new Date(s.dateAcquired) <= new Date(dateTo));
+        (!startDate || new Date(s.dateAcquired) >= startDate) &&
+        (!endDate || new Date(s.dateAcquired) <= endDate);
+
 
       return matchesSearch && matchesFilter && matchesDate;
     })
@@ -343,9 +359,45 @@ const generateSampleId = (sample) => {
           boxShadow: "0 4px 10px rgba(0,0,0,0.1)",
         }}
       >
-        <h1 style={{ textAlign: "center", marginBottom: "20px" }}>
-          🌊 MEROBase Dashboard
-        </h1>
+<h1
+  style={{
+    textAlign: "center",
+    marginBottom: "20px",
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "12px",
+  }}
+>
+  <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+    <img
+      src={logo}
+      alt="MEROBase Logo"
+      style={{
+        width: "70px",
+        height: "70px",
+        objectFit: "contain",
+        borderRadius: "12px",
+      }}
+    />
+    <span style={{ fontSize: "2rem", fontWeight: "bold" }}>MEROBase Dashboard</span>
+  </div>
+
+  <button
+    style={{
+      padding: "4px 10px",  // smaller padding
+      fontSize: "0.9rem",   // smaller text
+      backgroundColor: "#007bff",
+      color: "white",
+      border: "none",
+      borderRadius: "5px",
+      cursor: "pointer",
+    }}
+    onClick={() => alert("Still on maintenance")}
+  >
+    Login
+  </button>
+</h1>
 
         {/* Search + Filter + Sort + Date */}
         <div
@@ -371,17 +423,48 @@ const generateSampleId = (sample) => {
               color: "black",
             }}
           />
-          <select
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            style={{ padding: "8px", borderRadius: "5px" }}
-          >
-            <option value="all">All</option>
-            <option value="animalia">Kingdom: Animalia</option>
-            <option value="plantae">Kingdom: Plantae</option>
-            <option value="projectA">Project: A</option>
-            <option value="projectB">Project: B</option>
-          </select>
+{/* Separated filter dropdowns */}
+<div style={{ display: "flex", gap: "10px", flexWrap: "wrap", justifyContent: "center" }}>
+  {/* Genus Filter */}
+  <select
+    value={filter}
+    onChange={(e) => setFilter(e.target.value)}
+    style={{ padding: "8px", borderRadius: "5px", minWidth: "160px" }}
+  >
+    <option value="all">All Genus</option>
+    <option value="acropora">Genus: Acropora</option>
+    <option value="pocilopora">Genus: Pocilopora</option>
+    <option value="chromodoris">Genus: Chromodoris</option>
+    <option value="hypselodoris">Genus: Hypselodoris</option>
+    <option value="glossodoris">Genus: Glossodoris</option>
+  </select>
+
+  {/* Kingdom Filter */}
+  <select
+    value={filter}
+    onChange={(e) => setFilter(e.target.value)}
+    style={{ padding: "8px", borderRadius: "5px", minWidth: "160px" }}
+  >
+    <option value="all">All Kingdom</option>
+    <option value="animalia">Kingdom: Animalia</option>
+    <option value="plantae">Kingdom: Plantae</option>
+    <option value="fungi">Kingdom: Fungi</option>
+    <option value="protista">Kingdom: Protista</option>
+    <option value="bacteria">Kingdom: Bacteria</option>
+    <option value="eubacteria">Kingdom: Eubacteria</option>
+  </select>
+
+  {/* Project Filter */}
+  <select
+    value={filter}
+    onChange={(e) => setFilter(e.target.value)}
+    style={{ padding: "8px", borderRadius: "5px", minWidth: "160px" }}
+  >
+    <option value="all">All Projects</option>
+    <option value="projectA">Project: A</option>
+    <option value="projectB">Project: B</option>
+  </select>
+</div>
           <select
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value)}
@@ -390,18 +473,17 @@ const generateSampleId = (sample) => {
             <option value="latest">Sort: Latest Edited</option>
             <option value="oldest">Sort: Oldest Edited</option>
           </select>
-          <input
-            type="date"
-            value={dateFrom}
-            onChange={(e) => setDateFrom(e.target.value)}
-            style={{ padding: "8px", borderRadius: "5px" }}
-          />
-          <input
-            type="date"
-            value={dateTo}
-            onChange={(e) => setDateTo(e.target.value)}
-            style={{ padding: "8px", borderRadius: "5px" }}
-          />
+      <ReactDatePicker
+        selectsRange
+        startDate={startDate}
+        endDate={endDate}
+        onChange={(update) => setDateRange(update)}
+        isClearable={true}
+        placeholderText="Select date range"
+        dateFormat="yyyy-MM-dd"
+        style={{ padding: "8px", borderRadius: "5px", minWidth: "220px" }}
+/>
+
         </div>
 
         {/* Add Button */}

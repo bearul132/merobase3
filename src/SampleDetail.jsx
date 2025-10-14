@@ -1,39 +1,39 @@
-import { useParams, Link } from "react-router-dom";
+// SampleDetail.jsx
+import { useLocation } from "react-router-dom";
 
-function SampleDetail() {
-  const { id } = useParams();
+export default function SampleDetail() {
+  const location = useLocation();
+  const sample = location.state?.sample;
 
-  // In real app, fetch from backend or context
-  // For now, mock data
-  const sample = {
-    sampleId: id,
-    sampleName: "Example Sample",
-    projectSample: "A",
-    projectNumber: 12,
-    sampleNumber: 1,
-    kingdom: "Animalia",
-    family: "Acroporidae",
-    genus: "Acropora",
-    species: "Acropora millepora",
-    dateAcquired: "2025-08-31",
-    coordinates: { x: -8.672, y: 115.452 },
-  };
+  if (!sample) return <p>No sample data provided.</p>;
 
   return (
-    <div style={{ textAlign: "center" }}>
-      <h1>Sample Detail</h1>
-      <p><b>ID:</b> {sample.sampleId}</p>
-      <p><b>Name:</b> {sample.sampleName}</p>
-      <p><b>Kingdom:</b> {sample.kingdom}</p>
-      <p><b>Family:</b> {sample.family}</p>
-      <p><b>Genus:</b> {sample.genus}</p>
-      <p><b>Species:</b> {sample.species}</p>
-      <p><b>Date Acquired:</b> {sample.dateAcquired}</p>
-      <p><b>Coordinates:</b> X={sample.coordinates.x}, Y={sample.coordinates.y}</p>
+    <div style={{ padding: "20px", fontFamily: "Arial, sans-serif" }}>
+      <h1>Sample Details: {sample.sampleName}</h1>
 
-      <Link to="/">⬅ Back to Dashboard</Link>
+      <div style={{ display: "flex", gap: "10px", marginBottom: "20px" }}>
+        {["image", "semPhoto", "isolatedPhoto"].map(
+          (t) =>
+            sample[t] && (
+              <a key={t} href={sample[t]} target="_blank" rel="noreferrer">
+                <img
+                  src={sample[t]}
+                  alt={t}
+                  style={{ width: "150px", height: "150px", objectFit: "cover", borderRadius: "8px" }}
+                />
+              </a>
+            )
+        )}
+      </div>
+
+      {Object.entries(sample).map(([key, value]) =>
+        ["image", "semPhoto", "isolatedPhoto"].includes(key) ? null : (
+          <p key={key}>
+            <b>{key}:</b>{" "}
+            {typeof value === "object" ? `X: ${value.x}, Y: ${value.y}` : String(value)}
+          </p>
+        )
+      )}
     </div>
   );
 }
-
-export default SampleDetail;
